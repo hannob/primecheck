@@ -1,0 +1,58 @@
+#!/usr/bin/python3
+
+import gmpy2, optparse, sys, os, subprocess, re, configparser
+
+parser = optparse.OptionParser()
+
+parser.add_option("-n", "--prime", dest="prime")
+parser.add_option("-s", "--server", dest="server")
+parser.add_option("-p", "--port", dest="port", default=443, help="port (default 443/https)")
+(opts, args) = parser.parse_args()
+
+if opts.prime:
+	prime = gmpy2.mpz(opts.prime, 16)
+elif opts.server:
+	ossl_out = subprocess.check_output([os.path.dirname(sys.argv[0])+"/openssl-trace",
+		"s_client", "-trace",
+		"-servername", opts.server,
+		"-cipher", "DHE",
+		"-connect", opts.server+":"+str(opts.port)],
+		stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+	for line in ossl_out.decode("utf-8").splitlines():
+		if 'dh_p' in line:
+			prime = gmpy2.mpz(re.sub(".*: ", "", line), 16)
+else:
+	parser.print_help()
+	sys.exit(1)
+
+print("checking prime p = %s" % hex(prime))
+
+bits = prime.bit_length()
+
+# check for known primes
+
+config = configparser.ConfigParser()
+config.read(os.path.dirname(sys.argv[0])+'/knownprimes.ini')
+
+for sect in config.sections():
+	if config.get(sect, 'prime') == hex(prime):
+		print("This is known prime %s" % sect)
+
+if bits < 1024:
+	print("\033[91m%i bits, that's very short and insecure, use 2048 bit or more\033[39m" % bits)
+elif bits < 2048:
+	print("\033[93m%i bits, better use 2048 bit or more\033[39m" % bits)
+else:
+	print("\033[92m%i bits, that should be long enough\033[39m" % bits)
+
+if gmpy2.is_prime(prime):
+	print("\033[92mp is prime\033[39m")
+else:
+	print("\033[91mnoprimep is not a prime, that is broken\033[39m")
+
+p12 = gmpy2.div(gmpy2.sub(prime, 1), 2)
+
+if gmpy2.is_prime(p12):
+	print("\033[92m(p-1)/2 is a Sophie Germain Prime, p is a safe prime\033[39m")
+else:
+	print("\033[93m(p-1)/2 is not a prime, therefore p is no safe prime\033[39m")
